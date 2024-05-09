@@ -99,11 +99,13 @@ func listenSerial(ctx context.Context, dev *os.File, ch chan int) {
 }
 
 type SidetoneOscillator struct {
-	mu     sync.Mutex
-	pitch  int
-	volume float32
-	keyed  bool
-	phase  float64
+	mu        sync.Mutex
+	pitch     int
+	volume    float32
+	keyed     bool
+	phase     float64
+	rampLen   int
+	rampLevel int
 }
 
 func (st *SidetoneOscillator) SetPitch(pitch int) {
@@ -116,6 +118,12 @@ func (st *SidetoneOscillator) SetVolume(volume int) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.volume = float32(volume) / 100
+}
+
+func (st *SidetoneOscillator) SetRamp(dur time.Duration) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.rampLen = int(math.Round(4800 * dur.Seconds()))
 }
 
 func (st *SidetoneOscillator) SetKeyed(keyed bool) {
@@ -136,7 +144,21 @@ func (st *SidetoneOscillator) Generate(out []float32) (int, error) {
 			st.phase -= 2 * math.Pi
 		}
 		if st.keyed {
-			out[i] = float32(math.Sin(st.phase)) * st.volume
+			if st.rampLevel < st.rampLen {
+				st.rampLevel++
+			}
+		} else if st.rampLevel > 0 {
+			st.rampLevel--
+		}
+
+		if st.rampLevel > 0 {
+			vol := st.volume
+			if st.rampLevel < st.rampLen {
+				rampProgress := float64(st.rampLevel) / float64(st.rampLen)
+				sin := float32(math.Sin(math.Pi * (rampProgress - 0.5)))
+				vol *= (1 + sin) / 2
+			}
+			out[i] = float32(math.Sin(st.phase)) * vol
 		} else {
 			out[i] = 0
 		}
@@ -239,6 +261,7 @@ func main() {
 		ditlen = (1200 * time.Millisecond) / time.Duration(wpm)
 		sidetoneOsc.SetPitch(pitch)
 		sidetoneOsc.SetVolume(volume)
+		sidetoneOsc.SetRamp(ditlen / 10)
 		log.Info().Int("wpm", wpm).Int("pitch", pitch).Dur("ditlen", ditlen).Int("volume", volume).Send()
 	}
 
@@ -285,7 +308,6 @@ LOOP:
 			break LOOP
 		case upd := <-txUpdates:
 			if upd.Object == "transmit" {
-				var err error
 				if upd.CurrentState["speed"] != "" {
 					wpm, err = strconv.Atoi(upd.CurrentState["speed"])
 					if err != nil {
