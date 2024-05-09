@@ -6,4 +6,4 @@ Key | Function
 <kbd>PgDn</kbd> | Pitch down
 <kbd>+</kbd> or <kbd>=</kbd> | Sidetone volume up
 <kbd>-</kbd> | Sidetone volume down
-
+<kbd>Esc</kbd> | Exit
