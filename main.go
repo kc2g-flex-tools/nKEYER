@@ -4,15 +4,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"math"
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
-	"sync"
 	"time"
-
-	"golang.org/x/sys/unix"
 
 	"github.com/eiannone/keyboard"
 	"github.com/jfreymuth/pulse"
@@ -37,136 +32,6 @@ func init() {
 	flag.StringVar(&cfg.AudioSink, "sink", "default", "audio sink for sidetone")
 }
 
-var fc *flexclient.FlexClient
-var keyDev *os.File
-var ClientID string
-var ClientUUID string
-
-func bindClient() {
-	log.Info().Str("station", cfg.Station).Msg("Waiting for station")
-
-	clients := make(chan flexclient.StateUpdate)
-	sub := fc.Subscribe(flexclient.Subscription{"client ", clients})
-	cmdResult := fc.SendNotify("sub client all")
-
-	var found, cmdComplete bool
-
-	for !found || !cmdComplete {
-		select {
-		case upd := <-clients:
-			if upd.CurrentState["station"] == cfg.Station {
-				ClientID = strings.TrimPrefix(upd.Object, "client ")
-				ClientUUID = upd.CurrentState["client_id"]
-				found = true
-			}
-		case <-cmdResult.C:
-			cmdComplete = true
-		}
-	}
-	cmdResult.Close()
-
-	fc.Unsubscribe(sub)
-
-	log.Info().Str("client_id", ClientID).Str("uuid", ClientUUID).Msg("Found client")
-
-	fc.SendAndWait("client bind client_id=" + ClientUUID)
-}
-
-const (
-	Dit int = 1 << iota
-	Dah
-)
-
-func listenSerial(ctx context.Context, dev *os.File, ch chan int) {
-	fd := int(dev.Fd())
-
-	for {
-		unix.IoctlSetInt(fd, unix.TIOCMIWAIT, unix.TIOCM_CD|unix.TIOCM_CTS)
-		bits, err := unix.IoctlGetInt(fd, unix.TIOCMGET)
-		if err != nil {
-			log.Error().Err(err).Send()
-			continue
-		}
-		var elms int
-		if bits&unix.TIOCM_CTS != 0 {
-			elms |= Dah
-		}
-		if bits&unix.TIOCM_CD != 0 {
-			elms |= Dit
-		}
-		ch <- elms
-	}
-}
-
-type SidetoneOscillator struct {
-	mu        sync.Mutex
-	pitch     int
-	volume    float32
-	keyed     bool
-	phase     float64
-	rampLen   int
-	rampLevel int
-}
-
-func (st *SidetoneOscillator) SetPitch(pitch int) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	st.pitch = pitch
-}
-
-func (st *SidetoneOscillator) SetVolume(volume int) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	st.volume = float32(volume) / 100
-}
-
-func (st *SidetoneOscillator) SetRamp(dur time.Duration) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	rampDur := max(dur/10, 5*time.Millisecond)
-	st.rampLen = int(math.Round(48000 * rampDur.Seconds()))
-}
-
-func (st *SidetoneOscillator) SetKeyed(keyed bool) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	st.keyed = keyed
-}
-
-func (st *SidetoneOscillator) Generate(out []float32) (int, error) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-
-	phaseIncrement := float64(st.pitch) * 2 * math.Pi / 48000
-
-	for i := range out {
-		st.phase += phaseIncrement
-		if st.phase > 2*math.Pi {
-			st.phase -= 2 * math.Pi
-		}
-		if st.keyed {
-			if st.rampLevel < st.rampLen {
-				st.rampLevel++
-			}
-		} else if st.rampLevel > 0 {
-			st.rampLevel--
-		}
-
-		if st.rampLevel > 0 {
-			vol := st.volume
-			if st.rampLevel < st.rampLen {
-				rampProgress := float64(st.rampLevel) / float64(st.rampLen)
-				sin := float32(math.Sin(math.Pi * (rampProgress - 0.5)))
-				vol *= (1 + sin) / 2
-			}
-			out[i] = float32(math.Sin(st.phase)) * vol
-		} else {
-			out[i] = 0
-		}
-	}
-	return len(out), nil
-}
-
 func main() {
 	log.Logger = zerolog.New(
 		zerolog.ConsoleWriter{
@@ -175,6 +40,8 @@ func main() {
 	).With().Timestamp().Logger()
 
 	flag.Parse()
+
+	var err error
 
 	logLevel, err := zerolog.ParseLevel(cfg.LogLevel)
 	if err != nil {
@@ -196,17 +63,11 @@ func main() {
 		log.Fatal().Err(err).Msg("pulse.NewClient failed")
 	}
 
-	sidetoneOsc := SidetoneOscillator{}
-	sidetonePlayback, err := pc.NewPlayback(pulse.Float32Reader(sidetoneOsc.Generate),
-		pulse.PlaybackLatency(0.02),
-		pulse.PlaybackSampleRate(48000),
-	)
-	sidetonePlayback.Start()
-
-	keyDev, err = os.Open(cfg.KeyDev)
+	sidetoneOsc, err := NewSidetoneOscillator(pc)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to open keyer device")
+		log.Fatal().Err(err).Msg("NewSidetoneOscillator failed")
 	}
+	defer sidetoneOsc.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -231,8 +92,11 @@ func main() {
 	}
 	defer keyboard.Close()
 
-	keyer := make(chan int)
-	go listenSerial(ctx, keyDev, keyer)
+	keyer, err := NewKeyer()
+	if err != nil {
+		log.Fatal().Err(err).Send()
+	}
+	defer keyer.Close()
 
 	txUpdates := make(chan flexclient.StateUpdate)
 	_ = fc.Subscribe(flexclient.Subscription{"transmit", txUpdates})
@@ -369,7 +233,11 @@ LOOP:
 					updateWpm()
 				}
 			}
-		case elms := <-keyer:
+		case elms, ok := <-keyer.ch:
+			if !ok {
+				break LOOP
+			}
+
 			pressed = elms
 			switch state {
 			case StateIdle:
