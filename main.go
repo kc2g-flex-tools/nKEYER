@@ -123,7 +123,8 @@ func (st *SidetoneOscillator) SetVolume(volume int) {
 func (st *SidetoneOscillator) SetRamp(dur time.Duration) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	st.rampLen = int(math.Round(4800 * dur.Seconds()))
+	rampDur := max(dur/10, 5*time.Millisecond)
+	st.rampLen = int(math.Round(48000 * rampDur.Seconds()))
 }
 
 func (st *SidetoneOscillator) SetKeyed(keyed bool) {
