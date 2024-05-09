@@ -308,7 +308,7 @@ LOOP:
 			break LOOP
 		case upd := <-txUpdates:
 			if upd.Object == "transmit" {
-				if upd.CurrentState["speed"] != "" {
+				if upd.Updated["speed"] != "" {
 					wpm, err = strconv.Atoi(upd.CurrentState["speed"])
 					if err != nil {
 						log.Error().Err(err).Send()
@@ -316,7 +316,7 @@ LOOP:
 					}
 					initialized |= 1
 				}
-				if upd.CurrentState["pitch"] != "" {
+				if upd.Updated["pitch"] != "" {
 					pitch, err = strconv.Atoi(upd.CurrentState["pitch"])
 					if err != nil {
 						log.Error().Err(err).Send()
@@ -324,7 +324,7 @@ LOOP:
 					}
 					initialized |= 2
 				}
-				if upd.CurrentState["mon_gain_cw"] != "" {
+				if upd.Updated["mon_gain_cw"] != "" {
 					volume, err = strconv.Atoi(upd.CurrentState["mon_gain_cw"])
 					if err != nil {
 						log.Error().Err(err).Send()
