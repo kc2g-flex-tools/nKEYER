@@ -3,11 +3,9 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"os"
 	"os/signal"
 	"strconv"
-	"time"
 
 	"github.com/eiannone/keyboard"
 	"github.com/jfreymuth/pulse"
@@ -102,61 +100,7 @@ func main() {
 	_ = fc.Subscribe(flexclient.Subscription{"transmit", txUpdates})
 	fc.SendCmd("sub tx all")
 
-	type State int
-	const (
-		StateIdle State = iota
-		StateDit
-		StateDah
-		StatePauseDit
-		StatePauseDah
-	)
-
-	log.Info().Msg("entering main loop")
-
-	var wpm, pitch, volume int
-	var initialized int
-	var ditlen time.Duration
-	var pressed, queue int
-	var state State
-	timer := time.NewTimer(0)
-	pending := true
-
-	updateWpm := func() {
-		ditlen = (1200 * time.Millisecond) / time.Duration(wpm)
-		sidetoneOsc.SetPitch(pitch)
-		sidetoneOsc.SetVolume(volume)
-		sidetoneOsc.SetRamp(ditlen / 10)
-		log.Info().Int("wpm", wpm).Int("pitch", pitch).Dur("ditlen", ditlen).Int("volume", volume).Send()
-	}
-
-	updateTimer := func(dur time.Duration) {
-		if pending && !timer.Stop() {
-			<-timer.C
-		}
-		timer.Reset(dur)
-		pending = true
-	}
-
-	cwKey := func(pressed bool) {
-		sendFlexCW(pressed)
-		sidetoneOsc.SetKeyed(pressed)
-	}
-
-	sendDit := func() {
-		log.Info().Msg("dit")
-		state = StateDit
-		queue = 0
-		updateTimer(ditlen)
-		cwKey(true)
-	}
-
-	sendDah := func() {
-		log.Info().Msg("dah")
-		state = StateDah
-		queue = 0
-		updateTimer(3 * ditlen)
-		cwKey(true)
-	}
+	mm := NewMorseMachine(sidetoneOsc)
 
 LOOP:
 	for {
@@ -166,118 +110,57 @@ LOOP:
 		case upd := <-txUpdates:
 			if upd.Object == "transmit" {
 				if upd.Updated["speed"] != "" {
-					wpm, err = strconv.Atoi(upd.CurrentState["speed"])
+					wpm, err := strconv.Atoi(upd.CurrentState["speed"])
 					if err != nil {
 						log.Error().Err(err).Send()
 						break
 					}
-					initialized |= 1
+					mm.SetWpm(wpm)
 				}
 				if upd.Updated["pitch"] != "" {
-					pitch, err = strconv.Atoi(upd.CurrentState["pitch"])
+					pitch, err := strconv.Atoi(upd.CurrentState["pitch"])
 					if err != nil {
 						log.Error().Err(err).Send()
 						break
 					}
-					initialized |= 2
+					mm.SetPitch(pitch)
 				}
 				if upd.Updated["mon_gain_cw"] != "" {
-					volume, err = strconv.Atoi(upd.CurrentState["mon_gain_cw"])
+					volume, err := strconv.Atoi(upd.CurrentState["mon_gain_cw"])
 					if err != nil {
 						log.Error().Err(err).Send()
 						break
 					}
-					initialized |= 4
-				}
-				if initialized == 7 {
-					updateWpm()
+					mm.SetVolume(volume)
 				}
 			}
 		case key := <-keypresses:
 			switch key.Rune {
 			case '-':
-				volume--
-				fc.SendCmd(fmt.Sprintf("transmit set mon_gain_cw=%d", volume))
-				updateWpm()
+				mm.VolumeDown()
 			case '=', '+':
-				volume++
-				fc.SendCmd(fmt.Sprintf("transmit set mon_gain_cw=%d", volume))
-				updateWpm()
+				mm.VolumeUp()
 			case 0:
 				switch key.Key {
-				case keyboard.KeyEsc:
+				case keyboard.KeyEsc, 0x03:
 					cancel()
-				case keyboard.KeyArrowUp:
-					wpm++
-					fc.SendCmd(fmt.Sprintf("cw wpm %d", wpm))
-					updateWpm()
 				case keyboard.KeyArrowDown:
-					wpm--
-					fc.SendCmd(fmt.Sprintf("cw wpm %d", wpm))
-					updateWpm()
-				case keyboard.KeyPgup:
-					pitch += 10
-					fc.SendCmd(fmt.Sprintf("cw pitch %d", pitch))
-					updateWpm()
+					mm.SpeedDown()
+				case keyboard.KeyArrowUp:
+					mm.SpeedUp()
 				case keyboard.KeyPgdn:
-					pitch -= 10
-					fc.SendCmd(fmt.Sprintf("cw pitch %d", pitch))
-					updateWpm()
+					mm.PitchDown()
+				case keyboard.KeyPgup:
+					mm.PitchUp()
 				}
 			}
 		case elms, ok := <-keyer.ch:
 			if !ok {
 				break LOOP
 			}
-
-			pressed = elms
-			switch state {
-			case StateIdle:
-				if pressed&Dah != 0 {
-					// In the unlikely case we register both at once, dah wins
-					sendDah()
-				} else if pressed&Dit != 0 {
-					sendDit()
-				}
-			case StateDit, StatePauseDit:
-				if pressed&Dah != 0 {
-					queue = Dah
-				}
-			case StateDah, StatePauseDah:
-				if pressed&Dit != 0 {
-					queue = Dit
-				}
-			}
-		case <-timer.C:
-			pending = false
-			switch state {
-			case StateDit:
-				state = StatePauseDit
-				updateTimer(ditlen)
-				cwKey(false)
-			case StateDah:
-				state = StatePauseDah
-				updateTimer(ditlen)
-				cwKey(false)
-			case StatePauseDit:
-				if pressed&Dah != 0 || queue&Dah != 0 {
-					sendDah()
-				} else if pressed&Dit != 0 {
-					sendDit()
-				} else {
-					state = StateIdle
-				}
-			case StatePauseDah:
-				if pressed&Dit != 0 || queue&Dit != 0 {
-					sendDit()
-				} else if pressed&Dah != 0 {
-					sendDah()
-				} else {
-					state = StateIdle
-				}
-			}
+			mm.KeyerState(elms)
+		case <-mm.timer.C:
+			mm.TimerExpire()
 		}
 	}
-
-	_ = initialized
 }
