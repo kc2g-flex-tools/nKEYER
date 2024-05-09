@@ -118,7 +118,6 @@ func main() {
 	var ditlen time.Duration
 	var pressed, queue int
 	var state State
-	var idx int
 	timer := time.NewTimer(0)
 	pending := true
 
@@ -139,14 +138,7 @@ func main() {
 	}
 
 	cwKey := func(pressed bool) {
-		ts := time.Now().UnixMilli() % 65536
-		cwState := 0
-		if pressed {
-			cwState = 1
-		}
-		cmd := fmt.Sprintf("cw key %d time=0x%04X index=%d client_handle=%s", cwState, ts, idx, ClientID)
-		fc.SendCmd(cmd)
-		idx++
+		sendFlexCW(pressed)
 		sidetoneOsc.SetKeyed(pressed)
 	}
 

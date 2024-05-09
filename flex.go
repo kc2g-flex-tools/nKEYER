@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/kc2g-flex-tools/flexclient"
 	log "github.com/rs/zerolog/log"
@@ -41,4 +43,17 @@ func bindClient() {
 	log.Info().Str("client_id", ClientID).Str("uuid", ClientUUID).Msg("Found client")
 
 	fc.SendAndWait("client bind client_id=" + ClientUUID)
+}
+
+var idx int
+
+func sendFlexCW(pressed bool) {
+	ts := time.Now().UnixMilli() % 65536
+	cwState := 0
+	if pressed {
+		cwState = 1
+	}
+	cmd := fmt.Sprintf("cw key %d time=0x%04X index=%d client_handle=%s", cwState, ts, idx, ClientID)
+	fc.SendCmd(cmd)
+	idx++
 }
