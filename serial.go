@@ -25,7 +25,7 @@ func NewKeyer() (*Keyer, error) {
 	}
 
 	fd := int(keyDev.Fd())
-	ch := make(chan int)
+	ch := make(chan int, 10)
 
 	go func(ch chan int) {
 		defer func() { close(ch) }()
