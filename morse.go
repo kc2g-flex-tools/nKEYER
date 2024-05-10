@@ -2,15 +2,16 @@ package main
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
-
-	log "github.com/rs/zerolog/log"
 )
 
 type State int
 
 const (
-	StateIdle State = iota
+	StateIdleChar State = iota
+	StateIdle
 	StateDit
 	StateDah
 	StatePauseDit
@@ -22,6 +23,76 @@ const (
 	InitPitch
 	InitVolume
 )
+
+var morseTable = map[string]string{
+	".-":     "A",
+	".-.-":   "Ä",
+	"-...":   "B",
+	"-.-.":   "C",
+	"----":   "CH",
+	"-..":    "D",
+	".":      "E",
+	"..-.":   "F",
+	"--.":    "G",
+	"....":   "H",
+	"..":     "I",
+	".---":   "J",
+	"-.-":    "K",
+	".-..":   "L",
+	"--":     "M",
+	"-.":     "N",
+	"---":    "O",
+	"---.":   "Ö",
+	".--.":   "P",
+	"--.-":   "Q",
+	".-.":    "R",
+	"...":    "S",
+	"-":      "T",
+	"..-":    "U",
+	"..--":   "Ü",
+	"...-":   "V",
+	".--":    "W",
+	"-..-":   "X",
+	"-.--":   "Y",
+	"--..":   "Z",
+	"-----":  "0",
+	".----":  "1",
+	"..---":  "2",
+	"...--":  "3",
+	"....-":  "4",
+	".....":  "5",
+	"-....":  "6",
+	"--...":  "7",
+	"---..":  "8",
+	"----.":  "9",
+	".-.-.":  "+",
+	"--..--": ",",
+	"-....-": "-",
+	".-.-.-": ".",
+	"-..-.":  "/",
+	"---...": ";",
+	"-...-":  "=",
+	"..--..": "?",
+	".--.-.": "@",
+	".-...":  "<AS>",
+	"...-.-": "<SK>",
+}
+
+var morseRegex *regexp.Regexp
+
+func init() {
+	reStr := `(?:`
+	first := true
+	for key := range morseTable {
+		if !first {
+			reStr += `|`
+		}
+		first = false
+		reStr += regexp.QuoteMeta(key)
+	}
+	reStr += `) $`
+	morseRegex = regexp.MustCompile(reStr)
+}
 
 type MorseMachine struct {
 	wpm         int
@@ -39,6 +110,8 @@ type MorseMachine struct {
 	timerPending bool
 
 	sidetone *SidetoneOscillator
+
+	decodebuffer string
 }
 
 func NewMorseMachine(sidetone *SidetoneOscillator) *MorseMachine {
@@ -54,7 +127,6 @@ func (mm *MorseMachine) update() {
 	mm.sidetone.SetPitch(mm.pitch)
 	mm.sidetone.SetVolume(mm.volume)
 	mm.sidetone.SetRamp(mm.ditlen / 10)
-	log.Info().Int("wpm", mm.wpm).Int("pitch", mm.pitch).Dur("ditlen", mm.ditlen).Int("volume", mm.volume).Send()
 }
 
 func (mm *MorseMachine) updateTimer(dur time.Duration) {
@@ -72,19 +144,43 @@ func (mm *MorseMachine) key(pressed bool) {
 }
 
 func (mm *MorseMachine) Dit() {
-	log.Info().Msg("dit")
 	mm.state = StateDit
 	mm.queue = 0
 	mm.updateTimer(mm.ditlen)
+	mm.decode(".")
 	mm.key(true)
 }
 
 func (mm *MorseMachine) Dah() {
-	log.Info().Msg("dah")
 	mm.state = StateDah
 	mm.queue = 0
 	mm.updateTimer(3 * mm.ditlen)
+	mm.decode("-")
 	mm.key(true)
+}
+
+func (mm *MorseMachine) Idle() {
+	mm.state = StateIdleChar
+	mm.updateTimer(5 * mm.ditlen)
+	mm.decode(" ")
+}
+
+func (mm *MorseMachine) IdleWord() {
+	mm.state = StateIdle
+	if !strings.HasSuffix(mm.decodebuffer, " ") {
+		mm.decode(" ")
+	}
+}
+
+func (mm *MorseMachine) decode(ch string) {
+	mm.decodebuffer += ch
+	mm.decodebuffer = morseRegex.ReplaceAllStringFunc(mm.decodebuffer, func(match string) string {
+		return morseTable[strings.TrimSuffix(match, " ")]
+	})
+
+	if len(mm.decodebuffer) > 78 {
+		mm.decodebuffer = mm.decodebuffer[len(mm.decodebuffer)-78:]
+	}
 }
 
 func (mm *MorseMachine) SetWpm(wpm int) {
@@ -146,16 +242,18 @@ func (mm *MorseMachine) PitchDown() {
 	mm.update()
 }
 
-func (mm *MorseMachine) KeyerState(pressed int) {
+func (mm *MorseMachine) KeyerState(pressed int) (ret string) {
 	mm.pressed = pressed
 
 	switch mm.state {
-	case StateIdle:
+	case StateIdle, StateIdleChar:
 		if pressed&Dah != 0 {
 			// In the unlikely case we register both at once, dah wins
 			mm.Dah()
+			ret = mm.decodebuffer
 		} else if pressed&Dit != 0 {
 			mm.Dit()
+			ret = mm.decodebuffer
 		}
 	case StateDit, StatePauseDit:
 		if pressed&Dah != 0 {
@@ -166,9 +264,10 @@ func (mm *MorseMachine) KeyerState(pressed int) {
 			mm.queue = Dit
 		}
 	}
+	return
 }
 
-func (mm *MorseMachine) TimerExpire() {
+func (mm *MorseMachine) TimerExpire() (ret string) {
 	mm.timerPending = false
 	switch mm.state {
 	case StateDit:
@@ -182,18 +281,27 @@ func (mm *MorseMachine) TimerExpire() {
 	case StatePauseDit:
 		if mm.pressed&Dah != 0 || mm.queue&Dah != 0 {
 			mm.Dah()
+			ret = mm.decodebuffer
 		} else if mm.pressed&Dit != 0 {
 			mm.Dit()
+			ret = mm.decodebuffer
 		} else {
-			mm.state = StateIdle
+			mm.Idle()
+			ret = mm.decodebuffer
 		}
 	case StatePauseDah:
 		if mm.pressed&Dit != 0 || mm.queue&Dit != 0 {
 			mm.Dit()
+			ret = mm.decodebuffer
 		} else if mm.pressed&Dah != 0 {
 			mm.Dah()
+			ret = mm.decodebuffer
 		} else {
-			mm.state = StateIdle
+			mm.Idle()
+			ret = mm.decodebuffer
 		}
+	case StateIdleChar:
+		mm.IdleWord()
 	}
+	return
 }
