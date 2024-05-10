@@ -55,5 +55,9 @@ func sendFlexCW(pressed bool) {
 	}
 	cmd := fmt.Sprintf("cw key %d time=0x%04X index=%d client_handle=%s", cwState, ts, idx, ClientID)
 	fc.SendCmd(cmd)
+	time.Sleep(250 * time.Microsecond)
+	fc.SendCmd(cmd)
+	time.Sleep(250 * time.Microsecond)
+	fc.SendCmd(cmd)
 	idx++
 }
