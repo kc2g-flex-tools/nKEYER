@@ -113,6 +113,7 @@ func main() {
 		for {
 			select {
 			case <-ctx.Done():
+				p.Send(tea.Quit())
 				break LOOP
 			case upd := <-txUpdates:
 				if upd.Object == "transmit" {

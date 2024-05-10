@@ -87,7 +87,7 @@ func NewUI(mm *MorseMachine) UIModel {
 		wpm:     NewNumberWidget(6, 1, " WPM", 0),
 		pitch:   NewNumberWidget(6, 1, " Pitch", 0),
 		volume:  NewNumberWidget(6, 1, " Volume", 0),
-		decoder: NewLogWidget(80, 10, " CW"),
+		decoder: NewLogWidget(80, 1, " CW"),
 		mm:      mm,
 	}
 }
@@ -102,12 +102,7 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case Decoded:
-
-		m.decoder.content += string(msg)
-		if len(m.decoder.content) > 78 {
-			m.decoder.content = m.decoder.content[len(m.decoder.content)-78:]
-		}
-
+		m.decoder.content = string(msg)
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "esc", "ctrl+c":
