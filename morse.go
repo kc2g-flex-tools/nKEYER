@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"time"
-
-	log "github.com/rs/zerolog/log"
 )
 
 type State int
@@ -54,7 +52,6 @@ func (mm *MorseMachine) update() {
 	mm.sidetone.SetPitch(mm.pitch)
 	mm.sidetone.SetVolume(mm.volume)
 	mm.sidetone.SetRamp(mm.ditlen / 10)
-	log.Info().Int("wpm", mm.wpm).Int("pitch", mm.pitch).Dur("ditlen", mm.ditlen).Int("volume", mm.volume).Send()
 }
 
 func (mm *MorseMachine) updateTimer(dur time.Duration) {
@@ -72,7 +69,6 @@ func (mm *MorseMachine) key(pressed bool) {
 }
 
 func (mm *MorseMachine) Dit() {
-	log.Info().Msg("dit")
 	mm.state = StateDit
 	mm.queue = 0
 	mm.updateTimer(mm.ditlen)
@@ -80,7 +76,6 @@ func (mm *MorseMachine) Dit() {
 }
 
 func (mm *MorseMachine) Dah() {
-	log.Info().Msg("dah")
 	mm.state = StateDah
 	mm.queue = 0
 	mm.updateTimer(3 * mm.ditlen)
@@ -146,7 +141,7 @@ func (mm *MorseMachine) PitchDown() {
 	mm.update()
 }
 
-func (mm *MorseMachine) KeyerState(pressed int) {
+func (mm *MorseMachine) KeyerState(pressed int) (ret string) {
 	mm.pressed = pressed
 
 	switch mm.state {
@@ -154,8 +149,10 @@ func (mm *MorseMachine) KeyerState(pressed int) {
 		if pressed&Dah != 0 {
 			// In the unlikely case we register both at once, dah wins
 			mm.Dah()
+			ret = "-"
 		} else if pressed&Dit != 0 {
 			mm.Dit()
+			ret = "."
 		}
 	case StateDit, StatePauseDit:
 		if pressed&Dah != 0 {
@@ -166,9 +163,10 @@ func (mm *MorseMachine) KeyerState(pressed int) {
 			mm.queue = Dit
 		}
 	}
+	return
 }
 
-func (mm *MorseMachine) TimerExpire() {
+func (mm *MorseMachine) TimerExpire() (ret string) {
 	mm.timerPending = false
 	switch mm.state {
 	case StateDit:
@@ -182,18 +180,25 @@ func (mm *MorseMachine) TimerExpire() {
 	case StatePauseDit:
 		if mm.pressed&Dah != 0 || mm.queue&Dah != 0 {
 			mm.Dah()
+			ret = "-"
 		} else if mm.pressed&Dit != 0 {
 			mm.Dit()
+			ret = "."
 		} else {
 			mm.state = StateIdle
+			ret = " "
 		}
 	case StatePauseDah:
 		if mm.pressed&Dit != 0 || mm.queue&Dit != 0 {
 			mm.Dit()
+			ret = "."
 		} else if mm.pressed&Dah != 0 {
 			mm.Dah()
+			ret = "-"
 		} else {
 			mm.state = StateIdle
+			ret = " "
 		}
 	}
+	return
 }
