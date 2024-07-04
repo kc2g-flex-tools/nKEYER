@@ -28,7 +28,8 @@ func NewUI(mm *MorseMachine) UIModel {
 
 	makeTextView := func(title string) *tview.TextView {
 		tv := tview.NewTextView().SetScrollable(false)
-		tv.SetBorder(true).SetTitle(title)
+		tv.SetBorder(true).SetTitle(title).SetTitleAlign(tview.AlignLeft).SetTitleColor(tcell.ColorLightGreen)
+		tv.SetBorderColor(tcell.ColorGray)
 		return tv
 	}
 
