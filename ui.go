@@ -66,23 +66,29 @@ func (m UIModel) InputEvent(event *tcell.EventKey) *tcell.EventKey {
 
 	case key == tcell.KeyUp:
 		m.mm.SpeedUp()
+		m.wpm.SetText(fmt.Sprintf("%d", m.mm.wpm))
 		return nil
 	case key == tcell.KeyDown:
 		m.mm.SpeedDown()
+		m.wpm.SetText(fmt.Sprintf("%d", m.mm.wpm))
 		return nil
 
 	case key == tcell.KeyPgUp:
 		m.mm.PitchUp()
+		m.pitch.SetText(fmt.Sprintf("%d", m.mm.pitch))
 		return nil
 	case key == tcell.KeyPgDn:
 		m.mm.PitchDown()
+		m.pitch.SetText(fmt.Sprintf("%d", m.mm.pitch))
 		return nil
 
 	case rune == '+', rune == '=':
 		m.mm.VolumeUp()
+		m.volume.SetText(fmt.Sprintf("%d", m.mm.volume))
 		return nil
 	case rune == '-':
 		m.mm.VolumeDown()
+		m.volume.SetText(fmt.Sprintf("%d", m.mm.volume))
 		return nil
 
 	default:
