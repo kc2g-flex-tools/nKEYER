@@ -9,6 +9,22 @@ import (
 	"github.com/jfreymuth/pulse"
 )
 
+type Sidetoner interface {
+	SetPitch(int)
+	SetVolume(int)
+	SetRamp(time.Duration)
+	SetKeyed(bool)
+	Close()
+}
+
+type DummySidetone struct{}
+
+func (d DummySidetone) SetPitch(_ int)          {}
+func (d DummySidetone) SetVolume(_ int)         {}
+func (d DummySidetone) SetRamp(_ time.Duration) {}
+func (d DummySidetone) SetKeyed(_ bool)         {}
+func (d DummySidetone) Close()                  {}
+
 type SidetoneOscillator struct {
 	mu        sync.Mutex
 	stream    *pulse.PlaybackStream
@@ -23,7 +39,7 @@ type SidetoneOscillator struct {
 func NewSidetoneOscillator(pc *pulse.Client) (*SidetoneOscillator, error) {
 	st := &SidetoneOscillator{}
 
-	playback, err := pc.NewPlayback(pulse.Float32Reader(st.Generate),
+	playback, err := pc.NewPlayback(pulse.Float32Reader(st.generate),
 		pulse.PlaybackLatency(0.02),
 		pulse.PlaybackSampleRate(48000),
 	)
@@ -59,7 +75,7 @@ func (st *SidetoneOscillator) SetKeyed(keyed bool) {
 	st.keyed = keyed
 }
 
-func (st *SidetoneOscillator) Generate(out []float32) (int, error) {
+func (st *SidetoneOscillator) generate(out []float32) (int, error) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 

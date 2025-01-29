@@ -18,6 +18,7 @@ var cfg struct {
 	KeyDev    string
 	LogLevel  string
 	AudioSink string
+	Sidetone  bool
 }
 
 func init() {
@@ -26,6 +27,7 @@ func init() {
 	flag.StringVar(&cfg.KeyDev, "port", "/dev/ttyUSB0", "keyer device to open")
 	flag.StringVar(&cfg.LogLevel, "log-level", "info", "minimum level of messages to log to console")
 	flag.StringVar(&cfg.AudioSink, "sink", "default", "audio sink for sidetone")
+	flag.BoolVar(&cfg.Sidetone, "sidetone", true, "whether to have local sidetone")
 }
 
 type Decoded string
@@ -53,19 +55,25 @@ func main() {
 		log.Fatal().Err(err).Msg("NewFlexClient failed")
 	}
 
-	pc, err := pulse.NewClient(
-		pulse.ClientApplicationName("nKEYER"),
-	)
+	var sidetoneOsc Sidetoner
 
-	if err != nil {
-		log.Fatal().Err(err).Msg("pulse.NewClient failed")
-	}
+	if cfg.Sidetone {
+		pc, err := pulse.NewClient(
+			pulse.ClientApplicationName("nKEYER"),
+		)
 
-	sidetoneOsc, err := NewSidetoneOscillator(pc)
-	if err != nil {
-		log.Fatal().Err(err).Msg("NewSidetoneOscillator failed")
+		if err != nil {
+			log.Fatal().Err(err).Msg("pulse.NewClient failed")
+		}
+
+		sidetoneOsc, err = NewSidetoneOscillator(pc)
+		if err != nil {
+			log.Fatal().Err(err).Msg("NewSidetoneOscillator failed")
+		}
+		defer sidetoneOsc.Close()
+	} else {
+		sidetoneOsc = DummySidetone{}
 	}
-	defer sidetoneOsc.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 

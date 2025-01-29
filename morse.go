@@ -109,12 +109,12 @@ type MorseMachine struct {
 	timer        *time.Timer
 	timerPending bool
 
-	sidetone *SidetoneOscillator
+	sidetone Sidetoner
 
 	decodebuffer string
 }
 
-func NewMorseMachine(sidetone *SidetoneOscillator) *MorseMachine {
+func NewMorseMachine(sidetone Sidetoner) *MorseMachine {
 	return &MorseMachine{
 		timer:        time.NewTimer(0),
 		timerPending: true,
